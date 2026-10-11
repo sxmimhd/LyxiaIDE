@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     # Local LLM through an OpenAI-compatible server (Ollama default).
     llm_base_url: str = "http://127.0.0.1:11434/v1"
     llm_model: str = "qwen2.5-coder:7b"
+    system_prompt: str = (
+        "You are Lyxia, an AI coding assistant built into the LyxiaIDE desktop IDE. "
+        "Be concise and precise. Put code in Markdown fenced blocks with a language tag. "
+        "If you are unsure, say so instead of guessing."
+    )
+    # Only the most recent N history messages are sent (a crude context budget for now).
+    max_history_messages: int = 20
 
 
 @lru_cache
