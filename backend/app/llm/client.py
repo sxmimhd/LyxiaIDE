@@ -1,3 +1,5 @@
+import json
+from collections.abc import AsyncIterator
 from functools import lru_cache
 from typing import Any
 
@@ -30,7 +32,29 @@ class LLMClient:
             json={"model": self.model, "messages": messages, "stream": False},
         )
         return data["choices"][0]["message"]["content"] or ""
-
+    async def chat_stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str]:
+        """Yield the reply token by token (OpenAI-style server-sent events)."""
+        payload = {"model": self.model, "messages": messages, "stream": True}
+        try:
+            async with httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout) as http:
+                async with http.stream("POST", "/chat/completions", json=payload) as response:
+                    if response.status_code >= 400:
+                        body = (await response.aread()).decode(errors="replace")
+                        raise LLMError(f"LLM server returned {response.status_code}: {body[:300]}")
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        data = line[5:].strip()
+                        if data == "[DONE]":
+                            return
+                        choices = json.loads(data).get("choices") or []
+                        token = choices[0].get("delta", {}).get("content") if choices else None
+                        if token:
+                            yield token
+        except httpx.ConnectError as e:
+            raise LLMError(f"Cannot reach the LLM server at {self.base_url}. Is Ollama running?") from e
+        except httpx.TimeoutException as e:
+            raise LLMError("The LLM server timed out.") from e
     async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         # A short-lived client per call: no connection lifecycle to manage,
         # and the cost is negligible for a localhost server.
