@@ -30,11 +30,11 @@ class RepoGraph:
 
     def link(self) -> None:
         files = set(self.files)
-        py_roots, package_dirs = R.python_roots({f for f in files if f.endswith((".py", ".pyi"))})
+        python = R.PythonResolver({f for f in files if f.endswith((".py", ".pyi"))})
         for path, parsed in self.files.items():
             for imp in parsed.imports:
                 if parsed.language == "python":
-                    targets = R.resolve_python(path, imp.source, imp.names, files, py_roots, package_dirs)
+                    targets = python.resolve(path, imp.source, imp.names)
                     for t in targets:
                         self._add_edge(path, t, imp.names)
                     if not targets:

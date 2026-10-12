@@ -38,17 +38,6 @@ def js_package(source: str) -> str:
     return "/".join(parts[:2]) if source.startswith("@") and len(parts) > 1 else parts[0]
 
 
-def python_roots(files: set[str]) -> tuple[list[str], set[str]]:
-    """Source roots (parents of top-level packages) and the set of package directories."""
-    package_dirs = {posixpath.dirname(f) for f in files if posixpath.basename(f) == "__init__.py"}
-    roots = {""}
-    for d in package_dirs:
-        parent = posixpath.dirname(d)
-        if parent != d and parent not in package_dirs:
-            roots.add(parent)
-    return sorted(roots), package_dirs
-
-
 def _module_file(module: str, base: str, files: set[str]) -> str | None:
     """module is slash-separated ("app/api"); "" means the package at `base` itself."""
     path = posixpath.join(base, module) if module else base
@@ -57,35 +46,71 @@ def _module_file(module: str, base: str, files: set[str]) -> str | None:
     return next((c for c in candidates if c in files), None)
 
 
-def resolve_python(importer: str, source: str, names: list[str], files: set[str],
-                   roots: list[str], package_dirs: set[str]) -> list[str]:
-    """Files this import points at: the module itself plus any imported submodules."""
-    if source.startswith("."):
-        dots = len(source) - len(source.lstrip("."))
-        module = source[dots:].replace(".", "/")
-        base = posixpath.dirname(importer)
-        for _ in range(dots - 1):
-            base = posixpath.dirname(base)
-        bases = [base]
-    else:
-        module = source.replace(".", "/")
-        importer_dir = posixpath.dirname(importer)
-        # A script outside any package has its own folder on sys.path.
-        bases = ([importer_dir] if importer_dir not in package_dirs else []) + roots
+class PythonResolver:
+    """Resolves Python imports to repo files. Works with regular packages (__init__.py)
+    and namespace packages (no __init__.py), because Python itself supports both."""
 
-    for base in bases:
-        found: list[str] = []
-        module_file = _module_file(module, base, files)
-        if module_file:
-            found.append(module_file)
-        for name in names:
-            if name != "*":
-                sub = _module_file(posixpath.join(module, name) if module else name, base, files)
-                if sub and sub not in found:
-                    found.append(sub)
-        if found:
-            return found
-    return []
+    def __init__(self, files: set[str]) -> None:
+        self.files = files
+        self.package_dirs = {posixpath.dirname(f) for f in files if posixpath.basename(f) == "__init__.py"}
+        roots = {""}
+        for d in self.package_dirs:  # the parent of a top-level package is a source root
+            parent = posixpath.dirname(d)
+            if parent != d and parent not in self.package_dirs:
+                roots.add(parent)
+        self.roots = sorted(roots)
+        # folder name -> the folders that contain a folder of that name
+        self.folder_index: dict[str, set[str]] = {}
+        for f in files:
+            parts = f.split("/")[:-1]
+            for i, part in enumerate(parts):
+                self.folder_index.setdefault(part, set()).add("/".join(parts[:i]))
+
+    def _bases(self, importer: str, top: str) -> list[str]:
+        """Folders that could be on sys.path for this importer, best guess first."""
+        bases: list[str] = []
+        d = posixpath.dirname(importer)
+        while True:  # ancestors, nearest first: "python -m ..." can be run from any of them
+            if not d or d not in self.package_dirs:  # a folder inside a package is never a sys.path entry
+                bases.append(d)
+            if not d:
+                break
+            d = posixpath.dirname(d)
+        bases += self.roots
+        containing = self.folder_index.get(top, set())
+        if len(containing) == 1:  # e.g. tests/ importing `app.main` that lives in backend/app
+            bases += [c for c in containing if not c or c not in self.package_dirs]
+        return list(dict.fromkeys(bases))
+
+    def resolve(self, importer: str, source: str, names: list[str]) -> list[str]:
+        """Files this import points at: the module itself plus any imported submodules."""
+        if source.startswith("."):
+            dots = len(source) - len(source.lstrip("."))
+            module = source[dots:].replace(".", "/")
+            base = posixpath.dirname(importer)
+            for _ in range(dots - 1):
+                base = posixpath.dirname(base)
+            bases = [base]
+        else:
+            top = source.split(".")[0]
+            if top in sys.stdlib_module_names:
+                return []  # never bind `import logging` to a local logging.py
+            module = source.replace(".", "/")
+            bases = self._bases(importer, top)
+
+        for base in bases:
+            found: list[str] = []
+            module_file = _module_file(module, base, self.files)
+            if module_file:
+                found.append(module_file)
+            for name in names:
+                if name != "*":
+                    sub = _module_file(posixpath.join(module, name) if module else name, base, self.files)
+                    if sub and sub not in found:
+                        found.append(sub)
+            if found:
+                return found
+        return []
 
 
 def python_kind(source: str) -> str:
