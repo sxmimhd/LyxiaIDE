@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { streamChat } from "../lib/chatStream";
+import { streamChat, type Source } from "../lib/chatStream";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
   error?: string;
+  notice?: string;
+  sources?: Source[];
 }
 
 export function ChatPanel() {
@@ -26,6 +28,9 @@ export function ChatPanel() {
     const text = input.trim();
     if (!text || streaming) return;
 
+    // Earlier turns go to the model so it remembers the conversation.
+    const history = messages.filter((m) => m.content && !m.error).map(({ role, content }) => ({ role, content }));
+
     setInput("");
     setMessages((prev) => [...prev, { role: "user", content: text }, { role: "assistant", content: "" }]);
     setStreaming(true);
@@ -33,8 +38,10 @@ export function ChatPanel() {
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      for await (const token of streamChat(text, controller.signal)) {
-        updateLast((m) => ({ ...m, content: m.content + token }));
+      for await (const ev of streamChat(text, history, controller.signal)) {
+        if (ev.type === "token") updateLast((m) => ({ ...m, content: m.content + ev.token }));
+        else if (ev.type === "sources") updateLast((m) => ({ ...m, sources: ev.sources }));
+        else updateLast((m) => ({ ...m, notice: ev.notice }));
       }
     } catch (e) {
       if (!controller.signal.aborted) {
@@ -53,12 +60,23 @@ export function ChatPanel() {
       </div>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 pb-3">
-        {messages.length === 0 && <p className="text-[#858585]">Ask something to start.</p>}
+        {messages.length === 0 && <p className="text-[#858585]">Ask something about your code to start.</p>}
         {messages.map((m, i) => (
           <div key={i}>
             <div className="mb-0.5 text-[11px] font-semibold text-[#858585] uppercase">
               {m.role === "user" ? "You" : "Lyxia"}
             </div>
+            {m.sources && m.sources.length > 0 && (
+              <div className="mb-1 text-[11px] text-[#858585]">
+                Sources:{" "}
+                {m.sources.map((s, k) => (
+                  <span key={k} className="mr-2 text-[#4ec9b0]">
+                    {s.path}:{s.start_line}-{s.end_line}
+                  </span>
+                ))}
+              </div>
+            )}
+            {m.notice && <div className="mb-1 text-[11px] text-yellow-500">{m.notice}</div>}
             <div className="whitespace-pre-wrap">{m.content}</div>
             {m.error && <div className="mt-1 rounded bg-red-900/40 px-2 py-1 text-red-300">⚠ {m.error}</div>}
           </div>

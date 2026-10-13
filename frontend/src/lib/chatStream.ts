@@ -1,11 +1,35 @@
 const API_URL = "http://127.0.0.1:8765";
 
-/** Streams a reply from the backend, yielding one token at a time. */
-export async function* streamChat(message: string, signal?: AbortSignal): AsyncGenerator<string> {
+// Temporary: the folder the AI searches. Replaced by the real "open folder" workspace later.
+export const WORKSPACE = "C:/Users/samym/Desktop/Projects/LyxiaIDE";
+
+export interface Source {
+  path: string;
+  name: string;
+  start_line: number;
+  end_line: number;
+}
+
+export interface HistoryMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export type StreamEvent =
+  | { type: "token"; token: string }
+  | { type: "sources"; sources: Source[] }
+  | { type: "notice"; notice: string };
+
+/** Streams a reply from the backend: first the sources used, then tokens one at a time. */
+export async function* streamChat(
+  message: string,
+  history: HistoryMessage[],
+  signal?: AbortSignal,
+): AsyncGenerator<StreamEvent> {
   const res = await fetch(`${API_URL}/llm/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, history, workspace: WORKSPACE }),
     signal,
   });
   if (!res.ok || !res.body) throw new Error(`Backend returned ${res.status}`);
@@ -27,9 +51,11 @@ export async function* streamChat(message: string, signal?: AbortSignal): AsyncG
       const data = event.replace(/^data:\s*/, "").trim();
       if (!data) continue;
       if (data === "[DONE]") return;
-      const parsed = JSON.parse(data) as { token?: string; error?: string };
+      const parsed = JSON.parse(data) as { token?: string; error?: string; sources?: Source[]; notice?: string };
       if (parsed.error) throw new Error(parsed.error);
-      if (parsed.token) yield parsed.token;
+      if (parsed.sources) yield { type: "sources", sources: parsed.sources };
+      if (parsed.notice) yield { type: "notice", notice: parsed.notice };
+      if (parsed.token) yield { type: "token", token: parsed.token };
     }
   }
 }
