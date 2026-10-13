@@ -1,12 +1,22 @@
-﻿from fastapi import FastAPI
+﻿from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.config import get_settings
 from app.api import health, index, llm, repo
+from app.config import get_settings
+from app.indexing.store import close_store
 
 settings = get_settings()
 
-app = FastAPI(title=settings.app_name, version=settings.version)
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    yield
+    close_store()  # release the vector database lock cleanly
+
+
+app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
 
 # The Electron UI is served from another origin (Vite), so the browser
 # needs CORS permission to call this API.

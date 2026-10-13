@@ -1,5 +1,5 @@
 from functools import lru_cache
-
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     # Local LLM through an OpenAI-compatible server (Ollama default).
     llm_base_url: str = "http://127.0.0.1:11434/v1"
     llm_model: str = "qwen2.5-coder:7b"
+    # Where indexes are stored (default: backend/data).
+    data_dir: Path = Path(__file__).resolve().parents[1] / "data"
     # Embeddings (also served through Ollama's OpenAI-compatible API).
     embed_base_url: str = "http://127.0.0.1:11434/v1"
     embed_model: str = "qwen3-embedding:0.6b"

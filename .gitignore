@@ -15,7 +15,7 @@ __pycache__/
 .coverage.*
 htmlcov/
 
-
+backend/data/
 backend/.venv/
 venv/
 env/

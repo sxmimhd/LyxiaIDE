@@ -7,13 +7,18 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from app.indexing.chunker import Chunk, build_chunks, chunk_source
-from app.indexing.memory_index import embed_chunks, top_k
+from app.indexing.service import (
+    IndexReport, IndexStatus, NoIndexableFilesError, NotIndexedError,
+    build_index, collection_name, index_status, search_index,
+)
+from app.indexing.store import get_store
 from app.llm.client import LLMError
 from app.llm.embeddings import get_embedder
 
 router = APIRouter(prefix="/index", tags=["indexing"])
 
 
+# ---------- chunk inspection ----------
 class ChunkRequest(BaseModel):
     path: str  # repository root
     extra_ignore: list[str] = []
@@ -64,7 +69,7 @@ def _root(path: str) -> Path:
 
 @router.post("/chunks", response_model=ChunkStats)
 def chunk_stats(req: ChunkRequest) -> ChunkStats:
-    """Chunk the whole repository and report statistics (nothing is stored or embedded yet)."""
+    """Chunk the whole repository and report statistics (nothing is stored or embedded)."""
     chunks = build_chunks(_root(req.path), req.extra_ignore)
     sizes = [len(c.text) for c in chunks] or [0]
     by_kind: dict[str, int] = {}
@@ -100,60 +105,92 @@ def file_chunks(req: FileChunksRequest) -> list[Chunk]:
         raise HTTPException(status_code=404, detail=f"Not a file: {rel}")
     return chunk_source(rel, target.read_bytes())
 
-class SearchPreviewRequest(BaseModel):
+
+# ---------- persistent index ----------
+class BuildRequest(BaseModel):
+    path: str  # repository root
+    extra_ignore: list[str] = []
+
+
+class PathRequest(BaseModel):
+    path: str
+
+
+class SearchRequest(BaseModel):
     path: str  # repository root
     query: str
-    top_k: int = Field(5, ge=1, le=20)
-    extra_ignore: list[str] = []
-    max_chunks: int = Field(1500, ge=1)  # safety net: this preview embeds everything in memory
+    top_k: int = Field(5, ge=1, le=50)
+    categories: list[str] | None = None  # e.g. ["source"], ["test"], ["docs", "config"]
+    kinds: list[str] | None = None  # e.g. ["function", "method", "class"]
+    include_text: bool = False  # return each chunk's full text (the AI will use this later)
 
 
 class SearchHit(BaseModel):
     score: float
     path: str
     kind: str
+    category: str
     name: str
     start_line: int
     end_line: int
+    signature: str | None
+    doc: str | None
     preview: str
+    text: str | None = None
 
 
-class SearchPreview(BaseModel):
+class SearchResult(BaseModel):
     model: str
-    dimensions: int
-    chunk_count: int
-    newly_embedded: int  # 0 on repeated calls: unchanged chunks come from the cache
-    embed_seconds: float
+    took_ms: int
+    index_complete: bool  # False: the last build did not finish, so some code may be missing from results
     hits: list[SearchHit]
 
 
-@router.post("/search-preview", response_model=SearchPreview)
-async def search_preview(req: SearchPreviewRequest) -> SearchPreview:
-    """Temporary: embed the repository in memory and run a semantic search over it.
-    The first call embeds every chunk (slow); later calls only embed what changed."""
-    root = _root(req.path)
-    chunks = await run_in_threadpool(build_chunks, root, req.extra_ignore)
-    if not chunks:
-        raise HTTPException(status_code=400, detail="No indexable files found")
-    if len(chunks) > req.max_chunks:
-        raise HTTPException(
-            status_code=400,
-            detail=f"{len(chunks)} chunks is more than max_chunks={req.max_chunks}. "
-                   "Use a smaller folder, add extra_ignore, or raise max_chunks.",
-        )
+@router.post("/build", response_model=IndexReport)
+async def build(req: BuildRequest) -> IndexReport:
+    """Index (or update the index of) a repository. Only new or changed chunks are embedded,
+    so the first run is slow and later runs are fast. Progress is saved batch by batch."""
+    try:
+        return await build_index(get_store(), get_embedder(), _root(req.path), req.extra_ignore)
+    except NoIndexableFilesError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except LLMError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+
+
+@router.post("/status", response_model=IndexStatus)
+async def status(req: PathRequest) -> IndexStatus:
+    return await run_in_threadpool(index_status, get_store(), get_embedder(), _root(req.path))
+
+
+@router.post("/clear")
+async def clear(req: PathRequest) -> dict[str, str]:
+    """Delete the index of a repository (e.g. to rebuild from scratch)."""
+    name = collection_name(_root(req.path), get_embedder().model)
+    await run_in_threadpool(get_store().drop, name)
+    return {"cleared": name}
+
+
+@router.post("/search", response_model=SearchResult)
+async def search(req: SearchRequest) -> SearchResult:
+    """Semantic search over the indexed repository."""
     embedder = get_embedder()
     started = time.perf_counter()
     try:
-        vectors, newly = await embed_chunks(embedder, chunks)
-        query_vector = await embedder.embed_query(req.query)
+        raw = await search_index(get_store(), embedder, _root(req.path), req.query, req.top_k,
+                                 req.categories, req.kinds)
+    except NotIndexedError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except LLMError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
-    elapsed = time.perf_counter() - started
-
-    hits = []
-    for i, score in top_k(query_vector, vectors, req.top_k):
-        c = chunks[i]
-        hits.append(SearchHit(score=round(score, 4), path=c.path, kind=c.kind, name=c.name,
-                              start_line=c.start_line, end_line=c.end_line, preview=c.text[:240]))
-    return SearchPreview(model=embedder.model, dimensions=len(query_vector), chunk_count=len(chunks),
-                         newly_embedded=newly, embed_seconds=round(elapsed, 2), hits=hits)
+    hits = [
+        SearchHit(
+            score=round(score, 4), path=p["path"], kind=p["kind"], category=p["category"], name=p["name"],
+            start_line=p["start_line"], end_line=p["end_line"], signature=p.get("signature"), doc=p.get("doc"),
+            preview=p["text"][:240], text=p["text"] if req.include_text else None,
+        )
+        for score, p in raw
+    ]
+    complete = (await run_in_threadpool(index_status, get_store(), embedder, _root(req.path))).complete
+    return SearchResult(model=embedder.model, took_ms=int((time.perf_counter() - started) * 1000),
+                        index_complete=complete, hits=hits)
