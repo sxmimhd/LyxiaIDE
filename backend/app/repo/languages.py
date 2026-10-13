@@ -29,6 +29,9 @@ DEFAULT_IGNORED_DIRS = {
 IGNORED_FILES = {
     "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "poetry.lock", "uv.lock",
     "Cargo.lock", "composer.lock", "Pipfile.lock", ".DS_Store", "Thumbs.db",
+        ".next", ".nuxt", ".turbo", ".cache", "coverage", ".idea", ".vscode", ".vs",
+    ".lyxia",  # LyxiaIDE's own state (indexes, evaluation sets): never part of the code being searched
+
 }
 
 CONFIG_NAMES = {

@@ -99,7 +99,12 @@ class VectorStore:
                 name, query=vector, limit=limit, with_payload=True,
                 query_filter=models.Filter(must=must) if must else None)
         return [(p.score, p.payload or {}) for p in result.points]
-
+    def get_payloads(self, name: str, chunk_ids: list[str]) -> dict[str, dict[str, Any]]:
+        if not chunk_ids:
+            return {}
+        with self._lock:
+            records = self._client.retrieve(name, ids=[point_id(i) for i in chunk_ids], with_payload=True, with_vectors=False)
+        return {r.payload["chunk_id"]: r.payload for r in records if r.payload}
     # ---- small metadata file (when / with which model a repo was indexed) ----
     def _read_meta(self) -> dict[str, Any]:
         try:

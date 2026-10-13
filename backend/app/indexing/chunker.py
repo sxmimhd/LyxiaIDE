@@ -4,15 +4,13 @@ import os
 import re
 from collections.abc import Iterator
 from pathlib import Path
-
 from pydantic import BaseModel
-
 from app.parsing.code_parser import EXTENSION_TO_LANGUAGE, CodeUnit, parse_source
 from app.repo.languages import (
     CONFIG_NAMES, DEFAULT_IGNORED_DIRS, EXTENSIONS, IGNORED_FILES, is_sensitive,
 )
 from app.repo.scanner import classify
-
+from app.config import get_settings
 MAX_CHUNK_CHARS = 2400  # ~600 tokens: small enough to embed precisely, large enough to keep meaning
 OVERLAP_LINES = 2  # lines repeated between the parts of a split chunk
 MAX_FILE_BYTES = 1_000_000
@@ -253,8 +251,11 @@ def chunk_source(rel_path: str, source: bytes) -> list[Chunk]:
 def iter_text_files(root: Path, extra_ignore: list[str] | None = None) -> Iterator[tuple[str, Path]]:
     """Files worth indexing: known text types, no secrets, no generated or vendored folders."""
     ignored = DEFAULT_IGNORED_DIRS | set(extra_ignore or [])
+    own_data = get_settings().data_dir.resolve()  # a custom LYXIA_DATA_DIR inside the repo must not be indexed
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if d not in ignored and not d.endswith(".egg-info"))
+        dirnames[:] = sorted(
+            d for d in dirnames
+            if d not in ignored and not d.endswith(".egg-info") and (Path(dirpath) / d).resolve() != own_data)
         for name in sorted(filenames):
             if name in IGNORED_FILES or is_sensitive(name) or name.endswith((".min.js", ".min.css")):
                 continue

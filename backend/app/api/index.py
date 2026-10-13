@@ -7,9 +7,11 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from app.indexing.chunker import Chunk, build_chunks, chunk_source
+from app.indexing.keyword import get_keyword_index
+from app.indexing.retrieval import Mode, retrieve
 from app.indexing.service import (
     IndexReport, IndexStatus, NoIndexableFilesError, NotIndexedError,
-    build_index, collection_name, index_status, search_index,
+    build_index, collection_name, index_status,
 )
 from app.indexing.store import get_store
 from app.llm.client import LLMError
@@ -123,10 +125,14 @@ class SearchRequest(BaseModel):
     categories: list[str] | None = None  # e.g. ["source"], ["test"], ["docs", "config"]
     kinds: list[str] | None = None  # e.g. ["function", "method", "class"]
     include_text: bool = False  # return each chunk's full text (the AI will use this later)
+    mode: Mode = "hybrid"  # hybrid = semantic + keyword fused | semantic | keyword
 
 
 class SearchHit(BaseModel):
-    score: float
+    score: float  # hybrid: fused RRF score | semantic: cosine similarity | keyword: BM25 (higher is better)
+    semantic_rank: int | None  # position in the semantic ranking (None = not found there)
+    keyword_rank: int | None  # position in the keyword ranking (None = not found there)
+    semantic_score: float | None
     path: str
     kind: str
     category: str
@@ -141,6 +147,8 @@ class SearchHit(BaseModel):
 
 class SearchResult(BaseModel):
     model: str
+    mode: str
+    warnings: list[str]  # e.g. semantic search unavailable, so only keyword results are shown
     took_ms: int
     index_complete: bool  # False: the last build did not finish, so some code may be missing from results
     hits: list[SearchHit]
@@ -151,7 +159,7 @@ async def build(req: BuildRequest) -> IndexReport:
     """Index (or update the index of) a repository. Only new or changed chunks are embedded,
     so the first run is slow and later runs are fast. Progress is saved batch by batch."""
     try:
-        return await build_index(get_store(), get_embedder(), _root(req.path), req.extra_ignore)
+        return await build_index(get_store(), get_keyword_index(), get_embedder(), _root(req.path), req.extra_ignore)
     except NoIndexableFilesError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except LLMError as e:
@@ -168,29 +176,33 @@ async def clear(req: PathRequest) -> dict[str, str]:
     """Delete the index of a repository (e.g. to rebuild from scratch)."""
     name = collection_name(_root(req.path), get_embedder().model)
     await run_in_threadpool(get_store().drop, name)
+    await run_in_threadpool(get_keyword_index().drop, name)
     return {"cleared": name}
 
 
 @router.post("/search", response_model=SearchResult)
 async def search(req: SearchRequest) -> SearchResult:
-    """Semantic search over the indexed repository."""
+    """Search the indexed repository: hybrid (default), semantic only, or keyword only."""
     embedder = get_embedder()
     started = time.perf_counter()
     try:
-        raw = await search_index(get_store(), embedder, _root(req.path), req.query, req.top_k,
-                                 req.categories, req.kinds)
+        result = await retrieve(get_store(), get_keyword_index(), embedder, _root(req.path), req.query, req.top_k,
+                                req.mode, req.categories, req.kinds)
     except NotIndexedError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except LLMError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     hits = [
         SearchHit(
-            score=round(score, 4), path=p["path"], kind=p["kind"], category=p["category"], name=p["name"],
-            start_line=p["start_line"], end_line=p["end_line"], signature=p.get("signature"), doc=p.get("doc"),
-            preview=p["text"][:240], text=p["text"] if req.include_text else None,
+            score=round(h.score, 4), semantic_rank=h.semantic_rank, keyword_rank=h.keyword_rank,
+            semantic_score=round(h.semantic_score, 4) if h.semantic_score is not None else None,
+            path=h.payload["path"], kind=h.payload["kind"], category=h.payload["category"], name=h.payload["name"],
+            start_line=h.payload["start_line"], end_line=h.payload["end_line"],
+            signature=h.payload.get("signature"), doc=h.payload.get("doc"),
+            preview=h.payload["text"][:240], text=h.payload["text"] if req.include_text else None,
         )
-        for score, p in raw
+        for h in result.hits
     ]
     complete = (await run_in_threadpool(index_status, get_store(), embedder, _root(req.path))).complete
-    return SearchResult(model=embedder.model, took_ms=int((time.perf_counter() - started) * 1000),
-                        index_complete=complete, hits=hits)
+    return SearchResult(model=embedder.model, mode=req.mode, warnings=result.warnings,
+                        took_ms=int((time.perf_counter() - started) * 1000), index_complete=complete, hits=hits)

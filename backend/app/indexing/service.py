@@ -4,12 +4,12 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from app.indexing.chunker import build_chunks
+from app.indexing.keyword import KeywordIndex
 from app.indexing.store import VectorStore
 from app.llm.embeddings import EmbeddingClient
 
@@ -33,6 +33,7 @@ class IndexReport(BaseModel):
     updated: int  # chunks whose text changed
     unchanged: int  # reused from the index: no embedding cost
     deleted: int  # chunks whose code no longer exists
+    keyword_indexed: int  # chunks written to the keyword index (cheap: no model involved)
     embed_seconds: float
     total_seconds: float
 
@@ -57,7 +58,7 @@ def _embed_hash(embedder: EmbeddingClient, text: str) -> str:
     return hashlib.sha256((embedder.document_prefix + text).encode()).hexdigest()
 
 
-async def build_index(store: VectorStore, embedder: EmbeddingClient, root: Path,
+async def build_index(store: VectorStore, keyword: KeywordIndex, embedder: EmbeddingClient, root: Path,
                       extra_ignore: list[str] | None = None) -> IndexReport:
     started = time.perf_counter()
     chunks = await run_in_threadpool(build_chunks, root, extra_ignore)
@@ -72,6 +73,13 @@ async def build_index(store: VectorStore, embedder: EmbeddingClient, root: Path,
     todo = [c for c in chunks if existing.get(c.id) != hashes[c.id]]
     stale = [cid for cid in existing if cid not in hashes]
     added = sum(1 for c in todo if c.id not in existing)
+
+    # The keyword index needs no model, so it is synced first and independently: keyword search works
+    # even if the embedding server is down, and indexes built before this feature are filled in here.
+    kw_existing = await run_in_threadpool(keyword.state, name)
+    kw_todo = [c for c in chunks if kw_existing.get(c.id) != hashes[c.id]]
+    await run_in_threadpool(keyword.upsert, name, kw_todo, [hashes[c.id] for c in kw_todo])
+    await run_in_threadpool(keyword.delete, name, [cid for cid in kw_existing if cid not in hashes])
 
     meta = store.get_meta(name) or {}
     dimensions = int(meta.get("dimensions", 0))
@@ -97,7 +105,7 @@ async def build_index(store: VectorStore, embedder: EmbeddingClient, root: Path,
     return IndexReport(
         collection=name, model=embedder.model, dimensions=dimensions, total_chunks=len(chunks),
         added=added, updated=len(todo) - added, unchanged=len(chunks) - len(todo), deleted=len(stale),
-        embed_seconds=round(embed_seconds, 2), total_seconds=round(time.perf_counter() - started, 2),
+        keyword_indexed=len(kw_todo), embed_seconds=round(embed_seconds, 2), total_seconds=round(time.perf_counter() - started, 2),
     )
 
 
@@ -109,13 +117,3 @@ def index_status(store: VectorStore, embedder: EmbeddingClient, root: Path) -> I
         return IndexStatus(indexed=False, complete=False, collection=name)
     return IndexStatus(indexed=True, complete=bool(meta.get("complete")), collection=name, chunk_count=count,
                        model=meta.get("model"), dimensions=meta.get("dimensions"), indexed_at=meta.get("indexed_at"))
-
-
-async def search_index(store: VectorStore, embedder: EmbeddingClient, root: Path, query: str, top_k: int,
-                       categories: list[str] | None = None,
-                       kinds: list[str] | None = None) -> list[tuple[float, dict[str, Any]]]:
-    name = collection_name(root, embedder.model)
-    if await run_in_threadpool(store.count, name) == 0:
-        raise NotIndexedError("This repository is not indexed yet. Call POST /index/build first.")
-    query_vector = await embedder.embed_query(query)
-    return await run_in_threadpool(store.search, name, query_vector, top_k, categories, kinds)
