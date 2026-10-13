@@ -21,6 +21,16 @@ class Settings(BaseSettings):
     # Local LLM through an OpenAI-compatible server (Ollama default).
     llm_base_url: str = "http://127.0.0.1:11434/v1"
     llm_model: str = "qwen2.5-coder:7b"
+    # Embeddings (also served through Ollama's OpenAI-compatible API).
+    embed_base_url: str = "http://127.0.0.1:11434/v1"
+    embed_model: str = "qwen3-embedding:0.6b"
+    embed_batch_size: int = 16
+    # Some models want different prefixes for queries and documents. Qwen3-Embedding takes an
+    # instruction on the query only; nomic-embed-text wants "search_query: " / "search_document: ".
+    embed_query_prefix: str = (
+        "Instruct: Given a question about a codebase, retrieve the code and documentation that answer it\nQuery:"
+    )
+    embed_document_prefix: str = ""
     system_prompt: str = (
         "You are Lyxia, an AI coding assistant built into the LyxiaIDE desktop IDE. "
         "Be concise and precise. Put code in Markdown fenced blocks with a language tag. "
