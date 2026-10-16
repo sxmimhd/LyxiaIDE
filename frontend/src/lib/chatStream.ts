@@ -1,7 +1,5 @@
-const API_URL = "http://127.0.0.1:8765";
-
-// Temporary: the folder the AI searches. Replaced by the real "open folder" workspace later.
-export const WORKSPACE = "C:/Users/samym/Desktop/Projects/LyxiaIDE";
+import { API_URL } from "./api";
+import type { ChatContext } from "./editorManager";
 
 export interface Source {
   path: string;
@@ -24,12 +22,31 @@ export type StreamEvent =
 export async function* streamChat(
   message: string,
   history: HistoryMessage[],
+  workspace: string | null,
+  context: ChatContext,
   signal?: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
+  const { activeFile, selection } = context;
   const res = await fetch(`${API_URL}/llm/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, history, workspace: WORKSPACE }),
+    body: JSON.stringify({
+      message,
+      history,
+      workspace,
+      active_file: activeFile && {
+        path: activeFile.path,
+        language: activeFile.language,
+        cursor_line: activeFile.cursorLine,
+        excerpt: activeFile.excerpt,
+        excerpt_start_line: activeFile.excerptStartLine,
+      },
+      selection: selection && {
+        text: selection.text,
+        start_line: selection.startLine,
+        end_line: selection.endLine,
+      },
+    }),
     signal,
   });
   if (!res.ok || !res.body) throw new Error(`Backend returned ${res.status}`);

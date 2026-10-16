@@ -86,3 +86,47 @@ export function resetEditors(): void {
   viewStates.clear();
   store().reset();
 }
+
+// ---- what the AI chat can see ----
+let activeEditor: monaco.editor.IStandaloneCodeEditor | null = null;
+
+export function registerEditor(editor: monaco.editor.IStandaloneCodeEditor | null) {
+  activeEditor = editor;
+}
+
+export interface ChatContext {
+  activeFile: { path: string; language: string; cursorLine: number; excerpt: string; excerptStartLine: number } | null;
+  selection: { text: string; startLine: number; endLine: number } | null;
+}
+
+const EXCERPT_RADIUS = 60; // lines above and below the cursor
+
+/** The active file's cursor, nearby code, and selection, captured at the moment a message is sent. */
+export function getChatContext(): ChatContext {
+  const path = store().activeTab;
+  const model = path ? models.get(path) : undefined;
+  if (!path || !model || !activeEditor) return { activeFile: null, selection: null };
+
+  const cursorLine = activeEditor.getPosition()?.lineNumber ?? 1;
+  const total = model.getLineCount();
+  const small = total <= 2 * EXCERPT_RADIUS; // small files are sent whole
+  const start = small ? 1 : Math.max(1, cursorLine - EXCERPT_RADIUS);
+  const end = small ? total : Math.min(total, cursorLine + EXCERPT_RADIUS);
+  const excerpt = model.getValueInRange({
+    startLineNumber: start,
+    startColumn: 1,
+    endLineNumber: end,
+    endColumn: model.getLineMaxColumn(end),
+  });
+
+  const sel = activeEditor.getSelection();
+  const selection =
+    sel && !sel.isEmpty()
+      ? { text: model.getValueInRange(sel), startLine: sel.startLineNumber, endLine: sel.endLineNumber }
+      : null;
+
+  return {
+    activeFile: { path, language: model.getLanguageId(), cursorLine, excerpt, excerptStartLine: start },
+    selection,
+  };
+}

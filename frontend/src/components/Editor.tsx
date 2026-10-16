@@ -1,7 +1,14 @@
 import { useEffect, useRef } from "react";
-import { getModel, getViewState, saveFile, saveViewState } from "../lib/editorManager";
+import { getModel, getViewState, registerEditor, saveFile, saveViewState } from "../lib/editorManager";
 import { monaco } from "../lib/monacoSetup";
 import { useWorkbench } from "../state/workbench";
+
+function publishSelection(editor: monaco.editor.IStandaloneCodeEditor) {
+  const sel = editor.getSelection();
+  useWorkbench
+    .getState()
+    .setSelection(sel && !sel.isEmpty() ? { startLine: sel.startLineNumber, endLine: sel.endLineNumber } : null);
+}
 
 export function Editor() {
   const container = useRef<HTMLDivElement>(null);
@@ -21,14 +28,18 @@ export function Editor() {
       scrollBeyondLastLine: false,
     });
     editorRef.current = editor;
+    registerEditor(editor);
 
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void saveFile(currentPath.current));
-    const sub = editor.onDidChangeCursorPosition((e) =>
+    const cursorSub = editor.onDidChangeCursorPosition((e) =>
       useWorkbench.getState().setCursor(e.position.lineNumber, e.position.column),
     );
+    const selectionSub = editor.onDidChangeCursorSelection(() => publishSelection(editor));
 
     return () => {
-      sub.dispose();
+      cursorSub.dispose();
+      selectionSub.dispose();
+      registerEditor(null);
       editor.dispose();
       editorRef.current = null;
       currentPath.current = null;
@@ -54,6 +65,7 @@ export function Editor() {
       const position = editor.getPosition();
       if (position) useWorkbench.getState().setCursor(position.lineNumber, position.column);
     }
+    publishSelection(editor);
   }, [activeTab]);
 
   return (

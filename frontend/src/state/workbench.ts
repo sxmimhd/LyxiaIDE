@@ -5,6 +5,7 @@ interface Workbench {
   activeTab: string | null;
   dirty: Record<string, boolean>; // path -> has unsaved changes
   cursor: { line: number; column: number };
+  selection: { startLine: number; endLine: number } | null; // selected lines in the active file
   language: string; // Monaco language id of the active file
   error: string | null;
 
@@ -13,6 +14,7 @@ interface Workbench {
   setActiveTab: (path: string | null) => void;
   setDirty: (path: string, dirty: boolean) => void;
   setCursor: (line: number, column: number) => void;
+  setSelection: (selection: { startLine: number; endLine: number } | null) => void;
   setLanguage: (language: string) => void;
   setError: (error: string | null) => void;
   reset: () => void;
@@ -23,6 +25,7 @@ export const useWorkbench = create<Workbench>((set) => ({
   activeTab: null,
   dirty: {},
   cursor: { line: 1, column: 1 },
+  selection: null,
   language: "plaintext",
   error: null,
 
@@ -40,7 +43,8 @@ export const useWorkbench = create<Workbench>((set) => ({
   setActiveTab: (activeTab) => set({ activeTab }),
   setDirty: (path, isDirty) => set((s) => (s.dirty[path] === isDirty ? s : { dirty: { ...s.dirty, [path]: isDirty } })),
   setCursor: (line, column) => set({ cursor: { line, column } }),
+  setSelection: (selection) => set({ selection }),
   setLanguage: (language) => set({ language }),
   setError: (error) => set({ error }),
-  reset: () => set({ tabs: [], activeTab: null, dirty: {}, error: null }),
+  reset: () => set({ tabs: [], activeTab: null, dirty: {}, selection: null, error: null }),
 }));

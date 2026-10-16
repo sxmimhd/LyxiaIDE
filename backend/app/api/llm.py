@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from app.config import get_settings
 from app.indexing.context import format_context
 from app.indexing.keyword import get_keyword_index
-from app.indexing.retrieval import retrieve
+from app.indexing.retrieval import RetrievedChunk, retrieve
 from app.indexing.service import NotIndexedError
 from app.indexing.store import get_store
 from app.llm.client import LLMError, get_llm
@@ -18,16 +18,37 @@ from app.llm.embeddings import get_embedder
 
 router = APIRouter(prefix="/llm", tags=["llm"])
 
+# Character budgets (about 4 characters per token). Kept small so the prompt fits the model's context window.
+SELECTION_CHARS = 5000
+EXCERPT_CHARS = 4000
+REPO_CONTEXT_CHARS = 4000
+
 
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str
 
 
+class ActiveFile(BaseModel):
+    path: str  # absolute path of the file open in the editor
+    language: str = ""
+    cursor_line: int = 1
+    excerpt: str = ""  # the code around the cursor
+    excerpt_start_line: int = 1
+
+
+class Selection(BaseModel):
+    text: str
+    start_line: int
+    end_line: int
+
+
 class ChatRequest(BaseModel):
     message: str
     history: list[ChatMessage] = []  # earlier turns, oldest first
     workspace: str | None = None  # repository root: when set, relevant code is retrieved for the model
+    active_file: ActiveFile | None = None
+    selection: Selection | None = None
 
 
 class ChatResponse(BaseModel):
@@ -35,22 +56,60 @@ class ChatResponse(BaseModel):
     reply: str
 
 
-def build_messages(req: ChatRequest, context: str | None = None) -> list[dict[str, str]]:
-    """system prompt + (trimmed) history + the new user message (with retrieved code, if any)."""
+def _fence(language: str, text: str) -> str:
+    return f"```{language}\n{text}\n```"
+
+
+def build_user_prompt(req: ChatRequest, repo_context: str | None) -> str:
+    """The user's question, preceded by everything the IDE knows about what they are looking at."""
+    parts: list[str] = []
+    if req.active_file:
+        f = req.active_file
+        parts.append(f"The user is editing `{f.path}` ({f.language}); the cursor is on line {f.cursor_line}.")
+    if req.selection:
+        s = req.selection
+        language = req.active_file.language if req.active_file else ""
+        parts.append(f"Selected code (lines {s.start_line}-{s.end_line}):\n{_fence(language, s.text[:SELECTION_CHARS])}")
+    elif req.active_file and req.active_file.excerpt:
+        f = req.active_file
+        parts.append(f"Code around the cursor (starting at line {f.excerpt_start_line}):\n"
+                     f"{_fence(f.language, f.excerpt[:EXCERPT_CHARS])}")
+    if repo_context:
+        parts.append(f"Related code from the repository:\n\n{repo_context}")
+    if not parts:
+        return req.message
+    return ("\n\n".join(parts)
+            + f"\n\nQuestion: {req.message}\n\n"
+            "Answer using the code above when it is relevant. Mention file paths and line numbers. "
+            "If the code does not contain the answer, say so.")
+
+
+def build_messages(req: ChatRequest, repo_context: str | None = None) -> list[dict[str, str]]:
+    """system prompt + (trimmed) history + the new user message with its context."""
     settings = get_settings()
     history = req.history[-settings.max_history_messages :] if settings.max_history_messages > 0 else []
-    user_content = req.message
-    if context:
-        user_content = (
-            "Answer using the code below from the user's repository when it is relevant. "
-            "Mention file paths. If the code does not contain the answer, say so.\n\n"
-            f"{context}\n\nQuestion: {req.message}"
-        )
     return [
         {"role": "system", "content": settings.system_prompt},
         *[m.model_dump() for m in history],
-        {"role": "user", "content": user_content},
+        {"role": "user", "content": build_user_prompt(req, repo_context)},
     ]
+
+
+def _not_already_visible(hits: list[RetrievedChunk], root: Path, req: ChatRequest) -> list[RetrievedChunk]:
+    """Drop retrieved chunks that overlap the code the user already sent (selection or excerpt)."""
+    if not req.active_file:
+        return hits
+    try:
+        rel = Path(req.active_file.path).resolve().relative_to(root).as_posix()
+    except (ValueError, OSError):
+        return hits
+    if req.selection:
+        lo, hi = req.selection.start_line, req.selection.end_line
+    else:
+        lo = req.active_file.excerpt_start_line
+        hi = lo + req.active_file.excerpt.count("\n")
+    return [h for h in hits
+            if not (h.payload["path"] == rel and h.payload["start_line"] <= hi and h.payload["end_line"] >= lo)]
 
 
 @router.get("/models")
@@ -64,7 +123,7 @@ async def list_models() -> dict[str, list[str]]:
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest) -> ChatResponse:
-    """Non-streaming chat (no repository context)."""
+    """Non-streaming chat (no repository search)."""
     llm = get_llm()
     try:
         reply = await llm.chat(build_messages(req))
@@ -80,26 +139,31 @@ def _sse(payload: dict[str, Any] | str) -> str:
 
 @router.post("/chat/stream")
 async def chat_stream(req: ChatRequest) -> StreamingResponse:
-    """Streams server-sent events: {"sources": [...]} first (if a workspace was given), then
+    """Streams server-sent events: {"sources": [...]} and/or {"notice": "..."} first, then
     {"token": "..."} repeatedly, then [DONE]. Errors arrive as {"error": "..."}."""
     llm = get_llm()
 
     async def events() -> AsyncIterator[str]:
-        context = None
+        repo_context = None
         if req.workspace:
             try:
-                result = await retrieve(get_store(), get_keyword_index(), get_embedder(),
-                                        Path(req.workspace).expanduser().resolve(), req.message, 6)
-                context = format_context(result.hits)
+                root = Path(req.workspace).expanduser().resolve()
+                # "Explain this" says nothing by itself, so the selected code helps the search too.
+                query = req.message + (f"\n{req.selection.text[:300]}" if req.selection else "")
+                result = await retrieve(get_store(), get_keyword_index(), get_embedder(), root, query, 8)
+                hits = _not_already_visible(result.hits, root, req)[:5]
+                repo_context = format_context(hits, REPO_CONTEXT_CHARS)
                 yield _sse({"sources": [
                     {"path": h.payload["path"], "name": h.payload["name"],
                      "start_line": h.payload["start_line"], "end_line": h.payload["end_line"]}
-                    for h in result.hits
+                    for h in hits
                 ]})
+                for warning in result.warnings:
+                    yield _sse({"notice": warning})
             except (NotIndexedError, LLMError) as e:
-                yield _sse({"notice": f"Answering without repository context: {e}"})
+                yield _sse({"notice": f"Answering without repository search: {e}"})
         try:
-            async for token in llm.chat_stream(build_messages(req, context)):
+            async for token in llm.chat_stream(build_messages(req, repo_context)):
                 yield _sse({"token": token})
         except LLMError as e:
             yield _sse({"error": str(e)})

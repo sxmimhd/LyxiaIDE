@@ -57,7 +57,7 @@ export default function App() {
           </div>
         </main>
         <aside className="w-96 shrink-0 border-l border-[#3c3c3c]">
-          <ChatPanel />
+            <ChatPanel workspace={workspace?.root ?? null} />
         </aside>
       </div>
       <StatusBar
