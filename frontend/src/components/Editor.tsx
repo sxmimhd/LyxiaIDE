@@ -31,6 +31,7 @@ export function Editor() {
     registerEditor(editor);
 
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => void saveFile(currentPath.current));
+        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, () => useWorkbench.getState().openEditBar());
     const cursorSub = editor.onDidChangeCursorPosition((e) =>
       useWorkbench.getState().setCursor(e.position.lineNumber, e.position.column),
     );

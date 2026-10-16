@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import health, index, llm, repo
+from app.api import edit, health, index, llm, repo
 from app.config import get_settings
 from app.indexing.store import close_store
 
@@ -31,3 +31,4 @@ app.include_router(health.router)
 app.include_router(llm.router)
 app.include_router(repo.router)
 app.include_router(index.router)
+app.include_router(edit.router)

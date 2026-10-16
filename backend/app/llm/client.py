@@ -70,6 +70,12 @@ class LLMClient:
         except httpx.HTTPStatusError as e:
             raise LLMError(f"LLM server returned {e.response.status_code}: {e.response.text[:300]}") from e
 
+    async def chat(self, messages: list[dict[str, str]], *, temperature: float | None = None) -> str:
+        payload: dict[str, Any] = {"model": self.model, "messages": messages, "stream": False}
+        if temperature is not None:
+            payload["temperature"] = temperature
+        data = await self._request("POST", "/chat/completions", json=payload)
+        return data["choices"][0]["message"]["content"] or ""
 
 @lru_cache
 def get_llm() -> LLMClient:

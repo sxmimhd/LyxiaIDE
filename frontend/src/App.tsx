@@ -7,6 +7,7 @@ import { TabBar } from "./components/TabBar";
 import { confirmDiscardAll, resetEditors, saveFile } from "./lib/editorManager";
 import type { WorkspaceInfo } from "./lyxia";
 import { useWorkbench } from "./state/workbench";
+import { EditPanel } from "./components/EditPanel";
 
 export default function App() {
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
@@ -52,9 +53,10 @@ export default function App() {
         <Explorer workspace={workspace} onOpenFolder={() => void openFolder()} />
         <main className="flex min-w-0 flex-1 flex-col">
           <TabBar />
-          <div className="min-h-0 flex-1">
-            <Editor />
-          </div>
+            <div className="relative min-h-0 flex-1">
+              <Editor />
+              <EditPanel />
+            </div>
         </main>
         <aside className="w-96 shrink-0 border-l border-[#3c3c3c]">
             <ChatPanel workspace={workspace?.root ?? null} />

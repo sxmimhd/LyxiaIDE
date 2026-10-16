@@ -130,3 +130,40 @@ export function getChatContext(): ChatContext {
     selection,
   };
 }
+
+// ---- AI editing ----
+export interface EditContext {
+  path: string;
+  language: string;
+  content: string; // current text, including unsaved changes
+  cursorLine: number;
+  selection: { startLine: number; endLine: number } | null;
+}
+
+export function getEditContext(): EditContext | null {
+  const path = store().activeTab;
+  const model = path ? models.get(path) : undefined;
+  if (!path || !model || !activeEditor) return null;
+  const sel = activeEditor.getSelection();
+  return {
+    path,
+    language: model.getLanguageId(),
+    content: model.getValue(),
+    cursorLine: activeEditor.getPosition()?.lineNumber ?? 1,
+    selection: sel && !sel.isEmpty() ? { startLine: sel.startLineNumber, endLine: sel.endLineNumber } : null,
+  };
+}
+
+/**
+ * Applies AI-produced content to an open file as ONE undo step (Ctrl+Z reverts it).
+ * Nothing is written to disk until the user saves. Returns an error message, or null on success.
+ */
+export function applyAiEdit(path: string, newContent: string, expectedOriginal: string): string | null {
+  const model = models.get(path);
+  if (!model) return "The file is no longer open.";
+  if (model.getValue() !== expectedOriginal) return "The file changed while the AI was working. Ask again.";
+  model.pushStackElement();
+  model.pushEditOperations([], [{ range: model.getFullModelRange(), text: newContent }], () => null);
+  model.pushStackElement();
+  return null;
+}
