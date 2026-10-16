@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { DirEntry, WorkspaceInfo } from "../lyxia";
+import { openFile } from "../lib/editorManager";
 
 const errorText = (e: unknown) =>
   e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, "") : String(e);
@@ -18,7 +19,10 @@ function Node({ entry, depth, selected, onSelect, onError }: NodeProps) {
 
   const onClick = async () => {
     onSelect(entry.path);
-    if (!entry.isDir) return;
+        if (!entry.isDir) {
+      void openFile(entry.path);
+      return;
+    }
     try {
       // Folders are read lazily, the first time they are opened.
       if (!open && children === null) setChildren(await window.lyxia.workspace.readDir(entry.path));
