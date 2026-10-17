@@ -53,15 +53,20 @@ async def retrieve(store: VectorStore, keyword: KeywordIndex, embedder: Embeddin
     warnings: list[str] = []
     semantic: list[tuple[float, dict[str, Any]]] = []
     keyword_hits: list[tuple[str, float]] = []
-
     if mode in ("semantic", "hybrid"):
-        try:
-            vector = query_vector or await embedder.embed_query(query)
-            semantic = await run_in_threadpool(store.search, name, vector, depth, categories, kinds)
-        except LLMError as e:
+        if await run_in_threadpool(store.count, name) == 0:
+            # e.g. the last build failed before any vectors were saved, but the keyword index was already filled
             if mode == "semantic":
-                raise
-            warnings.append(f"Semantic search unavailable ({e}). Showing keyword results only.")
+                raise NotIndexedError("The vector index is empty. Click 'Index now' (or POST /index/build) to build it.")
+            warnings.append("The vector index is empty (the last build probably failed). Showing keyword results only.")
+        else:
+            try:
+                vector = query_vector or await embedder.embed_query(query)
+                semantic = await run_in_threadpool(store.search, name, vector, depth, categories, kinds)
+            except LLMError as e:
+                if mode == "semantic":
+                    raise
+                warnings.append(f"Semantic search unavailable ({e}). Showing keyword results only.")
     if mode in ("keyword", "hybrid"):
         keyword_hits = await run_in_threadpool(keyword.search, name, query, depth, categories, kinds)
 

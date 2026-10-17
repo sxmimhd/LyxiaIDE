@@ -95,6 +95,8 @@ class VectorStore:
         if kinds:
             must.append(models.FieldCondition(key="kind", match=models.MatchAny(any=kinds)))
         with self._lock:
+            if not self._client.collection_exists(name):
+                return []
             result = self._client.query_points(
                 name, query=vector, limit=limit, with_payload=True,
                 query_filter=models.Filter(must=must) if must else None)
@@ -103,6 +105,8 @@ class VectorStore:
         if not chunk_ids:
             return {}
         with self._lock:
+            if not self._client.collection_exists(name):
+                return {}
             records = self._client.retrieve(name, ids=[point_id(i) for i in chunk_ids], with_payload=True, with_vectors=False)
         return {r.payload["chunk_id"]: r.payload for r in records if r.payload}
     # ---- small metadata file (when / with which model a repo was indexed) ----

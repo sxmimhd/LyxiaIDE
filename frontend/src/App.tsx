@@ -42,6 +42,10 @@ export default function App() {
         e.preventDefault();
         void openFolder();
       }
+      else if (key === "k") {
+        e.preventDefault();
+        useWorkbench.getState().openEditBar();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

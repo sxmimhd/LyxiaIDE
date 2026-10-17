@@ -160,7 +160,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                 ]})
                 for warning in result.warnings:
                     yield _sse({"notice": warning})
-            except (NotIndexedError, LLMError) as e:
+            except Exception as e:  # any retrieval problem must not stop the answer
                 yield _sse({"notice": f"Answering without repository search: {e}"})
         try:
             async for token in llm.chat_stream(build_messages(req, repo_context)):
