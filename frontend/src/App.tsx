@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { ChatPanel } from "./components/ChatPanel";
+import { EditPanel } from "./components/EditPanel";
 import { Editor } from "./components/Editor";
 import { Explorer } from "./components/Explorer";
+import { ProjectEditPanel } from "./components/ProjectEditPanel";
 import { StatusBar } from "./components/StatusBar";
 import { TabBar } from "./components/TabBar";
 import { confirmDiscardAll, resetEditors, saveFile } from "./lib/editorManager";
 import type { WorkspaceInfo } from "./lyxia";
 import { useWorkbench } from "./state/workbench";
-import { EditPanel } from "./components/EditPanel";
 
 export default function App() {
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
@@ -41,10 +42,12 @@ export default function App() {
       } else if (key === "o") {
         e.preventDefault();
         void openFolder();
-      }
-      else if (key === "k") {
+      } else if (key === "k") {
         e.preventDefault();
         useWorkbench.getState().openEditBar();
+      } else if (key === "i") {
+        e.preventDefault();
+        useWorkbench.getState().openProjectEdit();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -57,13 +60,14 @@ export default function App() {
         <Explorer workspace={workspace} onOpenFolder={() => void openFolder()} />
         <main className="flex min-w-0 flex-1 flex-col">
           <TabBar />
-            <div className="relative min-h-0 flex-1">
-              <Editor />
-              <EditPanel />
-            </div>
+          <div className="relative min-h-0 flex-1">
+            <Editor />
+            <EditPanel />
+            <ProjectEditPanel workspace={workspace?.root ?? null} />
+          </div>
         </main>
         <aside className="w-96 shrink-0 border-l border-[#3c3c3c]">
-            <ChatPanel workspace={workspace?.root ?? null} />
+          <ChatPanel workspace={workspace?.root ?? null} />
         </aside>
       </div>
       <StatusBar

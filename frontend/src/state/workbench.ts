@@ -9,6 +9,7 @@ interface Workbench {
   language: string; // Monaco language id of the active file
   error: string | null;
   editBarOpen: boolean; // the "Edit with AI" bar (Ctrl+K)
+  projectEditOpen: boolean; // the multi-file edit panel (Ctrl+I)
 
   addTab: (path: string) => void;
   removeTab: (path: string) => void;
@@ -20,6 +21,8 @@ interface Workbench {
   setError: (error: string | null) => void;
   openEditBar: () => void;
   closeEditBar: () => void;
+  openProjectEdit: () => void;
+  closeProjectEdit: () => void;
   reset: () => void;
 }
 
@@ -32,6 +35,7 @@ export const useWorkbench = create<Workbench>((set) => ({
   language: "plaintext",
   error: null,
   editBarOpen: false,
+  projectEditOpen: false,
 
   addTab: (path) => set((s) => ({ tabs: s.tabs.includes(path) ? s.tabs : [...s.tabs, path], activeTab: path })),
   removeTab: (path) =>
@@ -52,5 +56,8 @@ export const useWorkbench = create<Workbench>((set) => ({
   setError: (error) => set({ error }),
   openEditBar: () => set({ editBarOpen: true }),
   closeEditBar: () => set({ editBarOpen: false }),
-  reset: () => set({ tabs: [], activeTab: null, dirty: {}, selection: null, error: null, editBarOpen: false }),
+  openProjectEdit: () => set({ projectEditOpen: true }),
+  closeProjectEdit: () => set({ projectEditOpen: false }),
+  reset: () =>
+    set({ tabs: [], activeTab: null, dirty: {}, selection: null, error: null, editBarOpen: false, projectEditOpen: false }),
 }));

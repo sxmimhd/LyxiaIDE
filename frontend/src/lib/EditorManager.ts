@@ -154,6 +154,8 @@ export function getEditContext(): EditContext | null {
   };
 }
 
+const normalizeEol = (text: string) => text.replace(/\r\n/g, "\n");
+
 /**
  * Applies AI-produced content to an open file as ONE undo step (Ctrl+Z reverts it).
  * Nothing is written to disk until the user saves. Returns an error message, or null on success.
@@ -161,9 +163,54 @@ export function getEditContext(): EditContext | null {
 export function applyAiEdit(path: string, newContent: string, expectedOriginal: string): string | null {
   const model = models.get(path);
   if (!model) return "The file is no longer open.";
-  if (model.getValue() !== expectedOriginal) return "The file changed while the AI was working. Ask again.";
+  // Line endings are ignored in the comparison: the editor normalises them, the backend reads them raw.
+  if (normalizeEol(model.getValue()) !== normalizeEol(expectedOriginal)) {
+    return "The file changed while the AI was working. Ask again.";
+  }
   model.pushStackElement();
   model.pushEditOperations([], [{ range: model.getFullModelRange(), text: newContent }], () => null);
   model.pushStackElement();
   return null;
+}
+
+// ---- multi-file AI edits ----
+/** Open files with their CURRENT text (unsaved edits included), so the AI plans from what the user sees. */
+export function getOpenFiles(): { path: string; content: string }[] {
+  const files: { path: string; content: string }[] = [];
+  for (const [path, model] of models) {
+    if (model.getValueLength() <= 200_000 && files.length < 20) files.push({ path, content: model.getValue() });
+  }
+  return files;
+}
+
+const samePath = (a: string, b: string) => a.replace(/\\/g, "/").toLowerCase() === b.replace(/\\/g, "/").toLowerCase();
+
+export interface ReviewedChange {
+  abs_path: string;
+  status: string; // modified | created
+  original: string;
+  new_content: string;
+}
+
+/**
+ * Applies one accepted change from a multi-file edit.
+ * - modified: opens the file and applies the edit as one undo step (saved only when the user presses Ctrl+S)
+ * - created: writes the new file to disk (it did not exist) and opens it
+ * Returns an error message, or null on success.
+ */
+export async function applyFileChange(change: ReviewedChange): Promise<string | null> {
+  try {
+    const open = [...models.keys()].find((k) => samePath(k, change.abs_path));
+    if (change.status === "created") {
+      await window.lyxia.workspace.createFile(change.abs_path, change.new_content);
+      await openFile(change.abs_path);
+      return models.has(change.abs_path) ? null : `Created ${baseName(change.abs_path)} but could not open it.`;
+    }
+    const path = open ?? change.abs_path;
+    if (!open) await openFile(path);
+    if (!models.has(path)) return `Could not open ${baseName(change.abs_path)}.`;
+    return applyAiEdit(path, change.new_content, change.original);
+  } catch (e) {
+    return `${baseName(change.abs_path)}: ${errorText(e)}`;
+  }
 }

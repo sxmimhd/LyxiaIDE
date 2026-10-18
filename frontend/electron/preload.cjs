@@ -9,5 +9,6 @@ contextBridge.exposeInMainWorld("lyxia", {
     readDir: (path) => ipcRenderer.invoke("fs:readDir", path),
     readFile: (path) => ipcRenderer.invoke("fs:readFile", path),
     writeFile: (path, content) => ipcRenderer.invoke("fs:writeFile", path, content),
+    createFile: (path, content) => ipcRenderer.invoke("fs:createFile", path, content),
   },
 });

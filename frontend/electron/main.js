@@ -30,6 +30,7 @@ function registerIpc() {
     if (result.canceled || !result.filePaths[0]) return null;
     const info = await workspace.open(result.filePaths[0]);
     await fs.writeFile(stateFile(), JSON.stringify({ root: info.root }), "utf8");
+    ipcMain.handle("fs:createFile", (_event, p, content) => workspace.createFile(p, content));
     return info;
   });
 

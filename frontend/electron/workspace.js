@@ -62,4 +62,31 @@ export class WorkspaceService {
   async writeFile(p, content) {
     await fs.writeFile(await this.#resolveSafe(p), content, "utf8");
   }
+
+    /** Creates a NEW file (and any missing folders). Refuses to overwrite and to leave the project. */
+  async createFile(p, content) {
+    if (!this.#root) throw new Error("No folder is open");
+    const abs = path.resolve(p);
+    if (!isInside(this.#root, abs)) throw new Error(`Path is outside the opened folder: ${p}`);
+    // The nearest folder that already exists must really be inside the project (no symlink escapes).
+    let anchor = abs;
+    for (;;) {
+      try {
+        await fs.access(anchor);
+        break;
+      } catch {
+        const parent = path.dirname(anchor);
+        if (parent === anchor) throw new Error(`Invalid path: ${p}`);
+        anchor = parent;
+      }
+    }
+    if (!isInside(this.#root, await fs.realpath(anchor))) throw new Error(`Path escapes the opened folder: ${p}`);
+    await fs.mkdir(path.dirname(abs), { recursive: true });
+    try {
+      await fs.writeFile(abs, content, { encoding: "utf8", flag: "wx" }); // "wx": fail if it already exists
+    } catch (err) {
+      if (err.code === "EEXIST") throw new Error(`File already exists: ${path.basename(abs)}`);
+      throw err;
+    }
+  }
 }

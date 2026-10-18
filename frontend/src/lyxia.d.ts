@@ -21,6 +21,8 @@ declare global {
         readDir(path: string): Promise<DirEntry[]>;
         readFile(path: string): Promise<string>;
         writeFile(path: string, content: string): Promise<void>;
+        /** Creates a NEW file (and missing folders). Rejects if it already exists. */
+        createFile(path: string, content: string): Promise<void>;
       };
     };
   }
