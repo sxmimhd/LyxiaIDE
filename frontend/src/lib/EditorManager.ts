@@ -1,6 +1,6 @@
 import { useWorkbench } from "../state/workbench";
 import { monaco } from "./monacoSetup";
-
+import { decideRollback } from "./rollbackLogic";
 /**
  * Owns the Monaco models (one per open file) and each file's view state (cursor, scroll, folds).
  * They live outside React, so switching tabs never loses undo history.
@@ -62,9 +62,9 @@ export async function saveFile(path: string | null): Promise<void> {
   }
 }
 
-/** Closes a tab. Asks before discarding unsaved changes. */
-export function closeFile(path: string): void {
-  if (store().dirty[path] && !window.confirm(`Discard unsaved changes to ${baseName(path)}?`)) return;
+/** Closes a tab. Asks before discarding unsaved changes, unless `force` is set. */
+export function closeFile(path: string, force = false): void {
+  if (!force && store().dirty[path] && !window.confirm(`Discard unsaved changes to ${baseName(path)}?`)) return;
   store().removeTab(path);
   models.get(path)?.dispose();
   models.delete(path);
@@ -212,5 +212,84 @@ export async function applyFileChange(change: ReviewedChange): Promise<string | 
     return applyAiEdit(path, change.new_content, change.original);
   } catch (e) {
     return `${baseName(change.abs_path)}: ${errorText(e)}`;
+  }
+}
+
+// ---- history and rollback ----
+export interface HistoryFileInput {
+  path: string; // absolute
+  status: "modified" | "created";
+  before: string | null; // null for a file the AI created
+  after: string;
+}
+
+/** Records an applied AI change so it can be rolled back later (even after saving or restarting). */
+export async function recordChangeSet(instruction: string, source: "project" | "file", files: HistoryFileInput[]): Promise<void> {
+  if (files.length === 0) return;
+  try {
+    await window.lyxia.history.save({ instruction, source, files });
+  } catch (e) {
+    store().setError(`The change was applied but could not be recorded in history: ${errorText(e)}`);
+  }
+}
+
+export interface RollbackResult {
+  path: string;
+  ok: boolean;
+  conflict: boolean; // true: the user changed the file since, so nothing was touched
+  message: string;
+}
+
+/**
+ * Rolls one file back to how it was before the AI change. Without `force`, a file the user changed since
+ * is left alone and reported as a conflict.
+ */
+export async function rollbackFile(file: HistoryFileInput, force: boolean): Promise<RollbackResult> {
+  const done = (message: string): RollbackResult => ({ path: file.path, ok: true, conflict: false, message });
+  try {
+    const open = [...models.keys()].find((k) => samePath(k, file.path));
+    let current: string | null;
+    if (open) {
+      current = models.get(open)?.getValue() ?? null; // the editor's text, unsaved edits included
+    } else {
+      try {
+        current = await window.lyxia.workspace.readFile(file.path);
+      } catch {
+        current = null; // missing (or unreadable) on disk
+      }
+    }
+
+    const decision = decideRollback(file, current, force);
+    switch (decision.action) {
+      case "conflict":
+        return { path: file.path, ok: false, conflict: true, message: decision.message };
+      case "skip":
+        return done(decision.message);
+      case "delete":
+        if (open) closeFile(open, true);
+        await window.lyxia.workspace.trash(file.path);
+        return done("Moved to the Recycle Bin");
+      case "recreate":
+        await window.lyxia.workspace.createFile(file.path, file.before ?? "");
+        return done("Recreated from the snapshot");
+      case "restore": {
+        const before = file.before ?? "";
+        const model = open ? models.get(open) : undefined;
+        if (open && model) {
+          // Inside the editor, so Ctrl+Z can still bring the AI version back; disk is restored too.
+          model.pushStackElement();
+          model.pushEditOperations([], [{ range: model.getFullModelRange(), text: before }], () => null);
+          model.pushStackElement();
+          await window.lyxia.workspace.writeFile(open, before);
+          savedVersion.set(open, model.getAlternativeVersionId());
+          store().setDirty(open, false);
+        } else {
+          await window.lyxia.workspace.writeFile(file.path, before);
+        }
+        return done("Restored");
+      }
+    }
+  } catch (e) {
+    return { path: file.path, ok: false, conflict: false, message: `${baseName(file.path)}: ${errorText(e)}` };
   }
 }

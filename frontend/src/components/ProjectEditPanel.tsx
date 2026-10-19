@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { applyFileChange, getOpenFiles } from "../lib/editorManager";
+import { applyFileChange, getOpenFiles, recordChangeSet } from "../lib/editorManager";
 import { streamProjectEdit, type FileChange } from "../lib/projectEdit";
 import { useWorkbench } from "../state/workbench";
 import { DiffReview } from "./DiffReview";
@@ -142,6 +142,19 @@ export function ProjectEditPanel({ workspace }: { workspace: string | null }) {
       if (problem) problems.push(`${c.path}: ${problem}`);
       else done[c.path] = true;
     }
+        // Record what was applied so it can be rolled back later.
+    await recordChangeSet(
+      instruction.trim(),
+      "project",
+      chosen
+        .filter((c) => done[c.path])
+        .map((c) => ({
+          path: c.abs_path,
+          status: c.status as "modified" | "created",
+          before: c.status === "created" ? null : c.original,
+          after: c.new_content,
+        })),
+    );
     setApplied((prev) => ({ ...prev, ...done }));
     setApplying(false);
     if (problems.length > 0) {

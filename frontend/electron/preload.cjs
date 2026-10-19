@@ -10,5 +10,12 @@ contextBridge.exposeInMainWorld("lyxia", {
     readFile: (path) => ipcRenderer.invoke("fs:readFile", path),
     writeFile: (path, content) => ipcRenderer.invoke("fs:writeFile", path, content),
     createFile: (path, content) => ipcRenderer.invoke("fs:createFile", path, content),
+    trash: (path) => ipcRenderer.invoke("fs:trash", path),
+  },
+  history: {
+    save: (input) => ipcRenderer.invoke("history:save", input),
+    list: () => ipcRenderer.invoke("history:list"),
+    get: (id) => ipcRenderer.invoke("history:get", id),
+    markRolledBack: (id, paths) => ipcRenderer.invoke("history:markRolledBack", id, paths),
   },
 });

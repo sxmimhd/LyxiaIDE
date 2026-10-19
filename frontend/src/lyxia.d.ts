@@ -10,6 +10,37 @@ export interface WorkspaceInfo {
   name: string;
 }
 
+export interface HistoryFileMeta {
+  path: string; // absolute
+  status: "modified" | "created";
+  rolledBack: boolean;
+}
+
+export interface HistoryMeta {
+  id: string;
+  createdAt: string; // ISO time
+  root: string;
+  instruction: string;
+  source: "project" | "file"; // multi-file edit (Ctrl+I) or single-file edit (Ctrl+K)
+  files: HistoryFileMeta[];
+}
+
+export interface HistoryFileData {
+  path: string;
+  before: string | null; // null for a file the AI created
+  after: string;
+}
+
+export interface HistoryRecord extends HistoryMeta {
+  data: HistoryFileData[];
+}
+
+export interface HistoryInput {
+  instruction: string;
+  source: "project" | "file";
+  files: { path: string; status: "modified" | "created"; before: string | null; after: string }[];
+}
+
 declare global {
   interface Window {
     lyxia: {
@@ -23,6 +54,14 @@ declare global {
         writeFile(path: string, content: string): Promise<void>;
         /** Creates a NEW file (and missing folders). Rejects if it already exists. */
         createFile(path: string, content: string): Promise<void>;
+        /** Moves a file to the Recycle Bin. */
+        trash(path: string): Promise<void>;
+      };
+      history: {
+        save(input: HistoryInput): Promise<string>;
+        list(): Promise<HistoryMeta[]>;
+        get(id: string): Promise<HistoryRecord>;
+        markRolledBack(id: string, paths: string[]): Promise<void>;
       };
     };
   }

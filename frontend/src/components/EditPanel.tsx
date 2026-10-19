@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { proposeEdit, type EditResponse } from "../lib/api";
-import { applyAiEdit, getEditContext } from "../lib/editorManager";
+import { applyAiEdit, getEditContext, recordChangeSet } from "../lib/editorManager";
 import { useWorkbench } from "../state/workbench";
 import { DiffReview } from "./DiffReview";
 
@@ -86,9 +86,12 @@ export function EditPanel() {
     if (!proposal) return;
     const problem = applyAiEdit(proposal.path, proposal.new_content, proposal.original);
     if (problem) {
-      setError(problem);
+            setError(problem);
       return;
     }
+    void recordChangeSet(instruction.trim(), "file", [
+      { path: proposal.path, status: "modified", before: proposal.original, after: proposal.new_content },
+    ]);
     setInstruction("");
     dismiss();
   }

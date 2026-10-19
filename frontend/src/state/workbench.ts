@@ -10,6 +10,7 @@ interface Workbench {
   error: string | null;
   editBarOpen: boolean; // the "Edit with AI" bar (Ctrl+K)
   projectEditOpen: boolean; // the multi-file edit panel (Ctrl+I)
+  historyOpen: boolean; // the AI change history panel
 
   addTab: (path: string) => void;
   removeTab: (path: string) => void;
@@ -23,6 +24,8 @@ interface Workbench {
   closeEditBar: () => void;
   openProjectEdit: () => void;
   closeProjectEdit: () => void;
+  openHistory: () => void;
+  closeHistory: () => void;
   reset: () => void;
 }
 
@@ -36,6 +39,7 @@ export const useWorkbench = create<Workbench>((set) => ({
   error: null,
   editBarOpen: false,
   projectEditOpen: false,
+  historyOpen: false,
 
   addTab: (path) => set((s) => ({ tabs: s.tabs.includes(path) ? s.tabs : [...s.tabs, path], activeTab: path })),
   removeTab: (path) =>
@@ -58,6 +62,11 @@ export const useWorkbench = create<Workbench>((set) => ({
   closeEditBar: () => set({ editBarOpen: false }),
   openProjectEdit: () => set({ projectEditOpen: true }),
   closeProjectEdit: () => set({ projectEditOpen: false }),
+  openHistory: () => set({ historyOpen: true }),
+  closeHistory: () => set({ historyOpen: false }),
   reset: () =>
-    set({ tabs: [], activeTab: null, dirty: {}, selection: null, error: null, editBarOpen: false, projectEditOpen: false }),
+    set({
+      tabs: [], activeTab: null, dirty: {}, selection: null, error: null,
+      editBarOpen: false, projectEditOpen: false, historyOpen: false,
+    }),
 }));

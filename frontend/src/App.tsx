@@ -9,6 +9,7 @@ import { TabBar } from "./components/TabBar";
 import { confirmDiscardAll, resetEditors, saveFile } from "./lib/editorManager";
 import type { WorkspaceInfo } from "./lyxia";
 import { useWorkbench } from "./state/workbench";
+import { HistoryPanel } from "./components/HistoryPanel";
 
 export default function App() {
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
@@ -64,6 +65,7 @@ export default function App() {
             <Editor />
             <EditPanel />
             <ProjectEditPanel workspace={workspace?.root ?? null} />
+            <HistoryPanel />
           </div>
         </main>
         <aside className="w-96 shrink-0 border-l border-[#3c3c3c]">
@@ -77,6 +79,7 @@ export default function App() {
         column={cursor.column}
         language={language}
         error={error}
+        onHistory={() => useWorkbench.getState().openHistory()}
       />
     </div>
   );

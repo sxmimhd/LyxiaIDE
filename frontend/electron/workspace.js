@@ -40,7 +40,23 @@ export class WorkspaceService {
     if (!isInside(this.#root, real)) throw new Error(`Path escapes the opened folder: ${p}`);
     return real;
   }
+  isRoot(p) {
+    return this.#root !== null && path.relative(this.#root, p) === "";
+  }
 
+  /**
+   * Like #resolveSafe, but does NOT follow a final symlink: deleting a link must act on the link itself,
+   * never on whatever it points to. Used before moving something to the Recycle Bin.
+   */
+  async resolveEntry(p) {
+    if (!this.#root) throw new Error("No folder is open");
+    const abs = path.resolve(p);
+    if (!isInside(this.#root, abs)) throw new Error(`Path is outside the opened folder: ${p}`);
+    if (this.isRoot(abs)) return this.#root;
+    const entry = path.join(await fs.realpath(path.dirname(abs)), path.basename(abs));
+    if (!isInside(this.#root, entry)) throw new Error(`Path escapes the opened folder: ${p}`);
+    return entry;
+  }
   /** Folders first, then files, each sorted by name. */
   async readDir(p) {
     const dir = await this.#resolveSafe(p);
