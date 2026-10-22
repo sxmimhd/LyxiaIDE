@@ -10,6 +10,7 @@ import { confirmDiscardAll, resetEditors, saveFile } from "./lib/editorManager";
 import type { WorkspaceInfo } from "./lyxia";
 import { useWorkbench } from "./state/workbench";
 import { HistoryPanel } from "./components/HistoryPanel";
+import { ToolsPanel } from "./components/ToolsPanel";
 
 export default function App() {
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
@@ -66,6 +67,7 @@ export default function App() {
             <EditPanel />
             <ProjectEditPanel workspace={workspace?.root ?? null} />
             <HistoryPanel />
+            <ToolsPanel workspace={workspace?.root ?? null} />          
           </div>
         </main>
         <aside className="w-96 shrink-0 border-l border-[#3c3c3c]">
@@ -80,6 +82,7 @@ export default function App() {
         language={language}
         error={error}
         onHistory={() => useWorkbench.getState().openHistory()}
+        onTools={() => useWorkbench.getState().openTools()}
       />
     </div>
   );
