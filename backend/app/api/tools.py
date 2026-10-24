@@ -8,24 +8,14 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from app.config import get_settings
-from app.tools.permissions import ApprovalBroker, AuditLog, PolicyStore
 from app.tools.registry import REGISTRY
 from app.tools.runner import run_tool
+from app.tools.shared import broker, get_audit, get_policies
 
 router = APIRouter(prefix="/tools", tags=["tools"])
-_broker = ApprovalBroker()
-
-
-@lru_cache
-def _policies() -> PolicyStore:
-    return PolicyStore(get_settings().data_dir / "permissions.json")
-
-
-@lru_cache
-def _audit() -> AuditLog:
-    return AuditLog(get_settings().data_dir / "tool_audit.jsonl")
-
+_broker = broker
+_policies = get_policies
+_audit = get_audit
 
 def _root(path: str) -> Path:
     root = Path(path).expanduser()
