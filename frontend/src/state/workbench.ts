@@ -12,6 +12,7 @@ interface Workbench {
   projectEditOpen: boolean; // the multi-file edit panel (Ctrl+I)
   historyOpen: boolean; // the AI change history panel
   toolsOpen: boolean; // the AI tools panel
+  agentOpen: boolean; // the autonomous agent panel
 
   addTab: (path: string) => void;
   removeTab: (path: string) => void;
@@ -29,6 +30,8 @@ interface Workbench {
   closeHistory: () => void;
   openTools: () => void;
   closeTools: () => void;
+  openAgent: () => void;
+  closeAgent: () => void;
   reset: () => void;
 }
 
@@ -44,6 +47,7 @@ export const useWorkbench = create<Workbench>((set) => ({
   projectEditOpen: false,
   historyOpen: false,
   toolsOpen: false,
+  agentOpen: false,
   
 
   addTab: (path) => set((s) => ({ tabs: s.tabs.includes(path) ? s.tabs : [...s.tabs, path], activeTab: path })),
@@ -71,9 +75,11 @@ export const useWorkbench = create<Workbench>((set) => ({
   closeHistory: () => set({ historyOpen: false }),
   openTools: () => set({ toolsOpen: true }),
   closeTools: () => set({ toolsOpen: false }),
+  openAgent: () => set({ agentOpen: true }),
+  closeAgent: () => set({ agentOpen: false }),
   reset: () =>
     set({
       tabs: [], activeTab: null, dirty: {}, selection: null, error: null,
-      editBarOpen: false, projectEditOpen: false, historyOpen: false, toolsOpen: false,
+      editBarOpen: false, projectEditOpen: false, historyOpen: false, toolsOpen: false, agentOpen: false,
     }),
 }));

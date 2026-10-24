@@ -293,3 +293,12 @@ export async function rollbackFile(file: HistoryFileInput, force: boolean): Prom
     return { path: file.path, ok: false, conflict: false, message: `${baseName(file.path)}: ${errorText(e)}` };
   }
 }
+
+// ---- agent support ----
+/** Saves an open file given any spelling of its path (case and slashes differ on Windows). Returns an error message or null. */
+export async function saveFileAnyPath(path: string): Promise<string | null> {
+  const key = [...models.keys()].find((k) => samePath(k, path));
+  if (!key) return "The file is not open in the editor.";
+  await saveFile(key);
+  return store().dirty[key] ? "Saving failed." : null;
+}

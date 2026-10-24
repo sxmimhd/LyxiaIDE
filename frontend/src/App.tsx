@@ -11,6 +11,7 @@ import type { WorkspaceInfo } from "./lyxia";
 import { useWorkbench } from "./state/workbench";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { ToolsPanel } from "./components/ToolsPanel";
+import { AgentPanel } from "./components/AgentPanel";
 
 export default function App() {
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
@@ -50,6 +51,9 @@ export default function App() {
       } else if (key === "i") {
         e.preventDefault();
         useWorkbench.getState().openProjectEdit();
+      } else if (key === "j") {
+        e.preventDefault();
+        useWorkbench.getState().openAgent();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -67,7 +71,8 @@ export default function App() {
             <EditPanel />
             <ProjectEditPanel workspace={workspace?.root ?? null} />
             <HistoryPanel />
-            <ToolsPanel workspace={workspace?.root ?? null} />          
+            <ToolsPanel workspace={workspace?.root ?? null} />  
+            <AgentPanel workspace={workspace?.root ?? null} />        
           </div>
         </main>
         <aside className="w-96 shrink-0 border-l border-[#3c3c3c]">
@@ -83,6 +88,7 @@ export default function App() {
         error={error}
         onHistory={() => useWorkbench.getState().openHistory()}
         onTools={() => useWorkbench.getState().openTools()}
+        onAgent={() => useWorkbench.getState().openAgent()}
       />
     </div>
   );

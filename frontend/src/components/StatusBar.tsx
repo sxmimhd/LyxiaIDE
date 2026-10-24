@@ -7,13 +7,17 @@ interface StatusBarProps {
   error: string | null;
   onHistory: () => void;
   onTools: () => void;
+  onAgent: () => void;
 }
 
-export function StatusBar({ workspaceName, hasFile, line, column, language, error, onHistory, onTools }: StatusBarProps) {
+export function StatusBar({ workspaceName, hasFile, line, column, language, error, onHistory, onTools, onAgent }: StatusBarProps) {
   return (
     <footer className="flex h-6 shrink-0 items-center justify-between bg-[#007acc] px-3 text-xs text-white select-none">
       <div className="flex min-w-0 items-center gap-4">
         <span className="shrink-0">{workspaceName ?? "No folder"}</span>
+        <button onClick={onAgent} className="shrink-0 rounded px-1.5 hover:bg-white/20" title="Autonomous agent (Ctrl+J)">
+          🤖 Agent
+        </button>
         <button onClick={onHistory} className="shrink-0 rounded px-1.5 hover:bg-white/20" title="AI change history and rollback">
           ⟲ AI history
         </button>
